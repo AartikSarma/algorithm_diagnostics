@@ -1,0 +1,23 @@
+Package: algorithmDiagnostics
+Title: Diagnostic Plots for Evaluating Clinical Algorithm Biases
+Version: 0.1.0
+Authors@R: person("Aartik", "Sarma", email = "aartik.sarma@ucsf.edu",
+                  role = c("aut", "cre"))
+Description: Generates diagnostic plots that evaluate clinical algorithms for
+    conditional biases across subgroups. Provides percentile-level trends,
+    quantile-aggregated point estimates with confidence intervals, LOESS
+    smoothers, and beeswarm distribution strips assembled into multi-panel
+    figures.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.3
+Imports:
+    dplyr,
+    ggbeeswarm,
+    ggplot2,
+    patchwork,
+    rlang,
+    scales,
+    stats,
+    tidyr
