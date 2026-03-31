@@ -77,21 +77,21 @@
 #' @importFrom stats sd qt qnorm quantile
 #' @export
 conditional_bias_plot <- function(data,
-                                  dependent_vars,
-                                  independent_vars,
-                                  grouping_vars,
-                                  color_palettes = NULL,
-                                  x_size = 0.5,
-                                  n_tiles = 10,
-                                  conf_level = 0.95,
-                                  y_limits = NULL,
-                                  min_n = NULL,
-                                  dep_var_labels = NULL,
-                                  strat_var_labels = NULL,
-                                  x_labels = NULL,
-                                  title_size = 11,
-                                  axis_text_size = 10,
-                                  legend_text_size = 10) {
+                                  dependent_vars,      # Vector of dependent variable names
+                                  independent_vars,    # Vector of independent variable names
+                                  grouping_vars,       # Vector of variables used for stratification
+                                  color_palettes = NULL, # List of named vectors containing colors for each stratification variable
+                                  x_size = 0.5,       # Size of points in the plot
+                                  n_tiles = 10,       # Number of tiles for aggregation
+                                  conf_level = 0.95,  # Confidence level for intervals
+                                  y_limits = NULL,    # Optional list of y-axis limits for each dependent variable
+                                  min_n = NULL,       # Minimum number of observations required for plotting
+                                  dep_var_labels = NULL,     # Vector of labels for dependent variables
+                                  strat_var_labels = NULL,   # Vector of labels for stratification variables
+                                  x_labels = NULL,           # Vector of x-axis labels
+                                  title_size = 11,          # Size for axis titles and legend titles
+                                  axis_text_size = 10,      # Size for axis text
+                                  legend_text_size = 10) {  # Size for legend text
 
   # Input validation
   if (!is.null(x_labels) && length(x_labels) != length(independent_vars)) {
@@ -112,9 +112,20 @@ conditional_bias_plot <- function(data,
     legend.text = element_text(size = legend_text_size)
   )
 
-  # Okabe-Ito color palette (colorblind-friendly default)
-  okabe_ito <- c("#E69F00", "#56B4E9", "#009E73", "#F0E442",
-                 "#0072B2", "#D55E00", "#CC79A7", "#000000")
+  # Color palette (colorblind-friendly default)
+  default_colors <- c(
+    "#000000",  # Black
+    "#E69F00",  # Orange
+    "#56B4E9",  # Light blue
+    "#009E73",  # Green
+    "#AA4499",  # Violet (replacing yellow)
+    "#0072B2",  # Dark blue
+    "#D55E00",  # Red
+    "#CC79A7",  # Pink
+    "#999999",  # Grey
+    "#44AA99",  # Teal
+    "#882255"   # Purple
+  )
 
   # Validate color palettes if provided
   if (!is.null(color_palettes)) {
@@ -122,20 +133,21 @@ conditional_bias_plot <- function(data,
       stop("Length of color_palettes must match number of grouping variables")
     }
 
+    # For each stratification variable, check if provided palette matches levels
     for (g in seq_along(grouping_vars)) {
       if (!is.null(color_palettes[[g]])) {
+        # Get unique levels for this stratification variable
         if (is.numeric(data[[grouping_vars[g]]])) {
           expected_levels <- c("Tercile 1", "Tercile 2", "Tercile 3")
         } else {
           expected_levels <- levels(factor(data[[grouping_vars[g]]]))
         }
 
+        # Check if palette has correct names and length
         if (length(color_palettes[[g]]) != length(expected_levels) ||
             !all(names(color_palettes[[g]]) %in% expected_levels)) {
-          stop(sprintf(
-            "Color palette for stratification variable %s must be a named vector with names matching levels: %s",
-            grouping_vars[g], paste(expected_levels, collapse = ", ")
-          ))
+          stop(sprintf("Color palette for stratification variable %s must be a named vector with names matching levels: %s",
+                       grouping_vars[g], paste(expected_levels, collapse = ", ")))
         }
       }
     }
@@ -143,15 +155,18 @@ conditional_bias_plot <- function(data,
 
   # Helper function to calculate confidence intervals
   calc_ci <- function(x, binary = FALSE) {
-    if (binary) {
+    if(binary) {
       n <- length(x)
       p <- mean(x, na.rm = TRUE)
       z <- qnorm((1 + conf_level) / 2)
 
-      center <- (p + z^2 / (2 * n)) / (1 + z^2 / n)
-      spread <- z * sqrt((p * (1 - p) + z^2 / (4 * n)) / n) / (1 + z^2 / n)
+      center <- (p + z^2/(2*n)) / (1 + z^2/n)
+      spread <- z * sqrt((p*(1-p) + z^2/(4*n)) / n) / (1 + z^2/n)
 
-      return(list(lower = center - spread, upper = center + spread))
+      return(list(
+        lower = center - spread,
+        upper = center + spread
+      ))
     } else {
       n <- length(x)
       se <- sd(x, na.rm = TRUE) / sqrt(n)
@@ -196,7 +211,7 @@ conditional_bias_plot <- function(data,
       )
     } else {
       n_levels <- length(levels(data$group_factor))
-      n_palette <- length(okabe_ito)
+      n_palette <- length(default_colors)
       end_index <- color_index + n_levels - 1
 
       if (end_index > n_palette) {
@@ -204,7 +219,7 @@ conditional_bias_plot <- function(data,
         n_random <- n_levels - n_from_palette
         warning(sprintf(
           paste0("Total number of strata across grouping variables exceeds ",
-                 "the %d colors in the default Okabe-Ito palette. Generating ",
+                 "the %d colors in the default palette. Generating ",
                  "%d random color(s) for stratification variable '%s'."),
           n_palette, n_random, grouping_var
         ))
@@ -217,11 +232,11 @@ conditional_bias_plot <- function(data,
           )
         )
         level_colors <- c(
-          if (n_from_palette > 0) okabe_ito[color_index:n_palette],
+          if (n_from_palette > 0) default_colors[color_index:n_palette],
           random_colors
         )
       } else {
-        level_colors <- okabe_ito[color_index:end_index]
+        level_colors <- default_colors[color_index:end_index]
       }
 
       color_index <- end_index + 1
@@ -316,47 +331,47 @@ conditional_bias_plot <- function(data,
       ntile_col <- paste0("ntile_var", i)
 
       p <- ggplot() +
-        geom_point(
-          data = all_perc_summaries[[d]][[i]],
-          aes(x = !!sym(perc_col),
-              y = squish(avg_dep, y_range),
-              color = group_factor,
-              shape = case_when(
-                squish(avg_dep, y_range) > avg_dep ~ "OOBUp",
-                squish(avg_dep, y_range) < avg_dep ~ "OOBDown",
-                TRUE ~ "x"
-              )),
-          size = x_size, alpha = 0.5
-        ) +
-        geom_point(
-          data = all_ntile_summaries[[d]][[i]],
-          aes(x = x_pos, y = avg_dep, color = group_factor),
-          position = position_dodge(width = dodge_width)
-        ) +
-        geom_errorbar(
-          data = all_ntile_summaries[[d]][[i]],
-          aes(x = x_pos, ymin = lower, ymax = upper, color = group_factor),
-          position = position_dodge(width = dodge_width),
-          width = 2
-        ) +
-        geom_smooth(
-          data = filter(data, !is.na(!!sym(dep_var))),
-          aes(x = !!sym(perc_col), y = !!sym(dep_var), color = group_factor),
-          method = "loess", se = FALSE, linewidth = 0.5
-        ) +
+        # Plot percentile data with alpha transparency
+        geom_point(data = all_perc_summaries[[d]][[i]],
+                   aes(x = !!sym(perc_col),
+                       y = squish(avg_dep, y_range),
+                       color = group_factor,
+                       shape = case_when(
+                         squish(avg_dep, y_range) > avg_dep ~ "OOBUp",
+                         squish(avg_dep, y_range) < avg_dep ~ "OOBDown",
+                         TRUE ~ "x"
+                       )),
+                   size = x_size, alpha = 0.5) +
+        # Plot summarized ntile data points
+        geom_point(data = all_ntile_summaries[[d]][[i]],
+                   aes(x = x_pos, y = avg_dep, color = group_factor),
+                   position = position_dodge(width = dodge_width)) +
+        # Add confidence interval error bars
+        geom_errorbar(data = all_ntile_summaries[[d]][[i]],
+                      aes(x = x_pos, ymin = lower, ymax = upper,
+                          color = group_factor),
+                      position = position_dodge(width = dodge_width),
+                      width = 2) +
+        # Add smoothed trend line
+        geom_smooth(data = filter(data, !is.na(!!sym(dep_var))),
+                    aes(x = !!sym(perc_col),
+                        y = !!sym(dep_var), color = group_factor),
+                    method = "loess", se = FALSE, size = 0.5) +
+        # Set plot limits
         coord_cartesian(xlim = c(0, 100), ylim = y_range) +
         color_scale +
+        # Define point shapes for out-of-bounds values
         scale_shape_manual(values = c("OOBUp" = 6, "x" = 4, "OOBDown" = 2)) +
         guides(shape = "none") +
-        labs(
-          x = NULL,
-          y = if (show_y_axis)
-            if (!is.null(dep_var_labels)) dep_var_labels[d] else dep_var
-          else NULL
-        ) +
+        # Set axis labels
+        labs(x = NULL,
+             y = if(show_y_axis)
+               if(!is.null(dep_var_labels)) dep_var_labels[d] else dep_var
+             else NULL) +
         theme_minimal() +
         size_theme
 
+      # Remove y-axis elements if not the first column
       if (!show_y_axis) {
         p <- p + theme(axis.text.y = element_blank(),
                        axis.ticks.y = element_blank())
@@ -369,18 +384,19 @@ conditional_bias_plot <- function(data,
       perc_col <- paste0("perc_var", i)
 
       p <- ggplot(data, aes(x = !!sym(perc_col), y = group_factor)) +
+        # Create beeswarm/quasi-random distribution of points
         geom_quasirandom(aes(color = group_factor), size = 0.1, alpha = 0.5) +
         scale_x_continuous(limits = c(0, 100)) +
         color_scale +
-        labs(
-          x = if (is.null(x_labels)) paste("Percentile of", independent_vars[i]) else x_labels[i],
-          y = if (show_y_axis) group_label else NULL
-        ) +
+        # Set axis labels
+        labs(x = if(is.null(x_labels)) paste("Percentile of", independent_vars[i]) else x_labels[i],
+             y = if(show_y_axis) group_label else NULL) +
         theme_minimal() +
         theme(legend.position = "none") +
         guides(color = "none") +
         size_theme
 
+      # Remove y-axis elements if not the first column
       if (!show_y_axis) {
         p <- p + theme(axis.text.y = element_blank(),
                        axis.ticks.y = element_blank())
@@ -416,11 +432,7 @@ conditional_bias_plot <- function(data,
   }
 
   # Create final combined plot with all stratification variables
-  final_plot <- wrap_plots(
-    all_strat_plots,
-    ncol = 1,
-    heights = rep(1, length(grouping_vars))
-  ) +
+  final_plot <- wrap_plots(all_strat_plots, ncol = 1, heights = rep(1, length(grouping_vars))) +
     plot_layout(guides = "collect")
 
   return(final_plot)
