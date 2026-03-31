@@ -167,6 +167,9 @@ conditional_bias_plot <- function(data,
   # Initialize list to store all plots
   all_strat_plots <- list()
 
+  # Track running color index across stratification variables
+  color_index <- 1
+
   # Process each stratification variable
   for (g in seq_along(grouping_vars)) {
     grouping_var <- grouping_vars[g]
@@ -193,9 +196,39 @@ conditional_bias_plot <- function(data,
       )
     } else {
       n_levels <- length(levels(data$group_factor))
+      n_palette <- length(okabe_ito)
+      end_index <- color_index + n_levels - 1
+
+      if (end_index > n_palette) {
+        n_from_palette <- max(0, n_palette - color_index + 1)
+        n_random <- n_levels - n_from_palette
+        warning(sprintf(
+          paste0("Total number of strata across grouping variables exceeds ",
+                 "the %d colors in the default Okabe-Ito palette. Generating ",
+                 "%d random color(s) for stratification variable '%s'."),
+          n_palette, n_random, grouping_var
+        ))
+        set.seed(42)
+        random_colors <- sprintf(
+          "#%s", paste0(
+            replicate(n_random, paste0(
+              sample(c(0:9, LETTERS[1:6]), 6, replace = TRUE), collapse = ""
+            ))
+          )
+        )
+        level_colors <- c(
+          if (n_from_palette > 0) okabe_ito[color_index:n_palette],
+          random_colors
+        )
+      } else {
+        level_colors <- okabe_ito[color_index:end_index]
+      }
+
+      color_index <- end_index + 1
+
       color_scale <- scale_color_manual(
         name = group_label,
-        values = okabe_ito[seq_len(n_levels)],
+        values = level_colors,
         limits = levels(data$group_factor)
       )
     }
