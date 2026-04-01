@@ -39,6 +39,9 @@
 #' @param x_labels Optional character vector of x-axis labels (must match
 #'   length of \code{independent_vars}). Defaults to
 #'   \code{"Percentile of <var>"}.
+#' @param use_percentiles Logical; when \code{TRUE} (default), the x-axis shows
+#'   percentile ranks (1--100). When \code{FALSE}, the x-axis shows the raw
+#'   (absolute) values of the independent variables.
 #' @param title_size Numeric text size for axis titles and legend titles
 #'   (default \code{11}).
 #' @param axis_text_size Numeric text size for axis tick labels
@@ -64,7 +67,7 @@
 #' print(result)
 #' }
 #'
-#' @importFrom dplyr filter group_by summarise mutate n ntile case_when `%>%`
+#' @importFrom dplyr filter group_by summarise mutate n ntile case_when left_join `%>%`
 #' @importFrom tidyr complete unnest_wider
 #' @importFrom ggplot2 ggplot aes geom_point geom_errorbar geom_smooth
 #'   coord_cartesian scale_color_manual scale_shape_manual scale_x_continuous
@@ -89,6 +92,7 @@ conditional_bias_plot <- function(data,
                                   dep_var_labels = NULL,     # Vector of labels for dependent variables
                                   strat_var_labels = NULL,   # Vector of labels for stratification variables
                                   x_labels = NULL,           # Vector of x-axis labels
+                                  use_percentiles = TRUE,   # Use percentile ranks (TRUE) or absolute values (FALSE) on x-axis
                                   title_size = 11,          # Size for axis titles and legend titles
                                   axis_text_size = 10,      # Size for axis text
                                   legend_text_size = 10) {  # Size for legend text
@@ -279,6 +283,15 @@ conditional_bias_plot <- function(data,
           summarise(avg_dep = mean(!!sym(dep_var), na.rm = TRUE), .groups = "drop") %>%
           complete(group_factor, !!sym(perc_col) := 1:100, fill = list(avg_dep = NA))
 
+        # For absolute x-axis, map percentile bins to mean raw values
+        if (!use_percentiles) {
+          perc_raw_means <- data %>%
+            group_by(!!sym(perc_col)) %>%
+            summarise(x_raw = mean(!!sym(var_name), na.rm = TRUE), .groups = "drop")
+          perc_summaries[[i]] <- perc_summaries[[i]] %>%
+            left_join(perc_raw_means, by = perc_col)
+        }
+
         # Calculate ntile summaries with confidence intervals
         ntile_summaries[[i]] <- data %>%
           filter(!is.na(!!sym(dep_var))) %>%
@@ -291,10 +304,19 @@ conditional_bias_plot <- function(data,
             else list(list(lower = NA, upper = NA)),
             .groups = "drop"
           ) %>%
-          unnest_wider(ci) %>%
-          mutate(
-            x_pos = !!sym(ntile_col) * (100 / n_tiles) - (50 / n_tiles)
-          )
+          unnest_wider(ci)
+
+        # Compute x positions for ntile points
+        if (use_percentiles) {
+          ntile_summaries[[i]] <- ntile_summaries[[i]] %>%
+            mutate(x_pos = !!sym(ntile_col) * (100 / n_tiles) - (50 / n_tiles))
+        } else {
+          ntile_raw_means <- data %>%
+            group_by(!!sym(ntile_col)) %>%
+            summarise(x_pos = mean(!!sym(var_name), na.rm = TRUE), .groups = "drop")
+          ntile_summaries[[i]] <- ntile_summaries[[i]] %>%
+            left_join(ntile_raw_means, by = ntile_col)
+        }
       }
 
       all_perc_summaries[[d]] <- perc_summaries
@@ -320,20 +342,36 @@ conditional_bias_plot <- function(data,
     }
 
     # Plot generation parameters
-    dodge_width <- 5
     point_size <- 2
+
+    # Compute x-axis ranges and dodge width per independent variable
+    x_ranges <- list()
+    dodge_widths <- list()
+    for (i in seq_along(independent_vars)) {
+      if (use_percentiles) {
+        x_ranges[[i]] <- c(0, 100)
+        dodge_widths[[i]] <- 5
+      } else {
+        raw_range <- range(data[[independent_vars[i]]], na.rm = TRUE)
+        x_ranges[[i]] <- raw_range
+        dodge_widths[[i]] <- diff(raw_range) / (n_tiles * 4)
+      }
+    }
 
     # Function to create plot for each dependent variable
     create_dep_var_panel <- function(d, i, show_y_axis = TRUE) {
       dep_var <- dependent_vars[d]
       y_range <- all_y_ranges[[d]]
       perc_col <- paste0("perc_var", i)
-      ntile_col <- paste0("ntile_var", i)
+      x_plot_col <- if (use_percentiles) perc_col else "x_raw"
+      x_smooth_col <- if (use_percentiles) perc_col else independent_vars[i]
+      dodge_width <- dodge_widths[[i]]
+      eb_width <- if (use_percentiles) 2 else diff(x_ranges[[i]]) / 50
 
       p <- ggplot() +
         # Plot percentile data with alpha transparency
         geom_point(data = all_perc_summaries[[d]][[i]],
-                   aes(x = !!sym(perc_col),
+                   aes(x = !!sym(x_plot_col),
                        y = squish(avg_dep, y_range),
                        color = group_factor,
                        shape = case_when(
@@ -351,14 +389,14 @@ conditional_bias_plot <- function(data,
                       aes(x = x_pos, ymin = lower, ymax = upper,
                           color = group_factor),
                       position = position_dodge(width = dodge_width),
-                      width = 2) +
+                      width = eb_width) +
         # Add smoothed trend line
         geom_smooth(data = filter(data, !is.na(!!sym(dep_var))),
-                    aes(x = !!sym(perc_col),
+                    aes(x = !!sym(x_smooth_col),
                         y = !!sym(dep_var), color = group_factor),
                     method = "loess", se = FALSE, size = 0.5) +
         # Set plot limits
-        coord_cartesian(xlim = c(0, 100), ylim = y_range) +
+        coord_cartesian(xlim = x_ranges[[i]], ylim = y_range) +
         color_scale +
         # Define point shapes for out-of-bounds values
         scale_shape_manual(values = c("OOBUp" = 6, "x" = 4, "OOBDown" = 2)) +
@@ -381,15 +419,16 @@ conditional_bias_plot <- function(data,
 
     # Function to create bottom panel plot (bee swarm distribution)
     create_bottom_panel <- function(i, show_y_axis = TRUE) {
-      perc_col <- paste0("perc_var", i)
+      x_beeswarm_col <- if (use_percentiles) paste0("perc_var", i) else independent_vars[i]
+      default_x_label <- if (use_percentiles) paste("Percentile of", independent_vars[i]) else independent_vars[i]
 
-      p <- ggplot(data, aes(x = !!sym(perc_col), y = group_factor)) +
+      p <- ggplot(data, aes(x = !!sym(x_beeswarm_col), y = group_factor)) +
         # Create beeswarm/quasi-random distribution of points
         geom_quasirandom(aes(color = group_factor), size = 0.1, alpha = 0.5) +
-        scale_x_continuous(limits = c(0, 100)) +
+        scale_x_continuous(limits = x_ranges[[i]]) +
         color_scale +
         # Set axis labels
-        labs(x = if(is.null(x_labels)) paste("Percentile of", independent_vars[i]) else x_labels[i],
+        labs(x = if(is.null(x_labels)) default_x_label else x_labels[i],
              y = if(show_y_axis) group_label else NULL) +
         theme_minimal() +
         theme(legend.position = "none") +
